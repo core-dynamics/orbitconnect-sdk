@@ -1,67 +1,70 @@
-# @orbitconnect/react-native
+# @orbitconnect/react
 
-React Native SDK for OrbitConnect — real-time chat, voice/video calls, and meetings.
+React SDK for OrbitConnect — drop in real-time chat, voice/video calls, and meetings into any React app.
 
-> All requests go to `https://api.orbitconnect.cloud/api/v1`. This base URL is fixed and cannot be overridden.
+> Get your API keys at [orbitconnect.cloud](https://orbitconnect.cloud). All requests go to `https://api.orbitconnect.cloud/api/v1` — this base URL is fixed and cannot be overridden.
 
 ## Install
 
 ```bash
-npm install @orbitconnect/react-native
+npm install @orbitconnect/react
 ```
 
-### Peer dependencies
+Also import the stylesheet once in your entry file:
 
-```bash
-npm install react-native-webrtc react-native-sound react-native-audio-recorder-player \
-  react-native-image-picker react-native-document-picker react-native-video \
-  react-native-fast-image @react-native-clipboard/clipboard \
-  react-native-haptic-feedback react-native-reanimated \
-  react-native-gesture-handler @shopify/flash-list \
-  react-native-callkeep react-native-voip-push-notification \
-  @react-native-firebase/messaging @notifee/react-native \
-  @react-native-async-storage/async-storage dayjs
-```
-
-### iOS
-
-```bash
-cd ios && pod install
-```
-
-Add to `Info.plist`:
-
-```xml
-<key>NSCameraUsageDescription</key><string>Video calls</string>
-<key>NSMicrophoneUsageDescription</key><string>Voice calls and messages</string>
-<key>NSPhotoLibraryUsageDescription</key><string>Send photos</string>
-```
-
-### Android
-
-Add to `AndroidManifest.xml`:
-
-```xml
-<uses-permission android:name="android.permission.CAMERA" />
-<uses-permission android:name="android.permission.RECORD_AUDIO" />
-<uses-permission android:name="android.permission.INTERNET" />
-<uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+```ts
+import '@orbitconnect/react/index.css'
 ```
 
 ---
 
-## Quick start
+## Get started
+
+### 1. Create an account
+
+Sign up at [orbitconnect.cloud](https://orbitconnect.cloud) to get your:
+- `ORBIT_SECRET_KEY` — server-side secret key (`sk_live_…`)
+- `ORBIT_CLIENT_ID` — publishable client ID (`pk_live_…`)
+
+### 2. Backend — issue a user token
+
+```ts
+// Express / Next.js API route
+import { OrbitServer } from '@orbitconnect/server'
+
+const orbit = new OrbitServer({ secretKey: process.env.ORBIT_SECRET_KEY! })
+
+app.post('/auth/token', async (req, res) => {
+  const user = await orbit.users.create({
+    external_id:  req.user.id,
+    display_name: req.user.name,
+  })
+  const { token } = await orbit.users.createToken(user.id)
+  res.json({ token, userId: user.id, clientId: process.env.ORBIT_CLIENT_ID })
+})
+```
+
+### 3. Frontend — wrap with OrbitProvider
 
 ```tsx
-import { OrbitProvider, Chat } from '@orbitconnect/react-native'
+import { OrbitProvider, Chat } from '@orbitconnect/react'
+import '@orbitconnect/react/index.css'
 
-export default function App() {
+export function App() {
+  const [auth, setAuth] = useState(null)
+
+  async function login() {
+    const data = await fetch('/auth/token', { method: 'POST' }).then(r => r.json())
+    setAuth(data)
+  }
+
+  if (!auth) return <button onClick={login}>Sign in</button>
+
   return (
     <OrbitProvider
-      clientId="pk_live_..."
-      userToken={token}
-      appUserId={userId}
-      appConfig={{ name: 'MyApp', showPoweredBy: false }}
+      clientId={auth.clientId}
+      userToken={auth.token}
+      appUserId={auth.userId}
     >
       <Chat />
     </OrbitProvider>
@@ -69,11 +72,13 @@ export default function App() {
 }
 ```
 
+That's it — you now have a fully functional chat with real-time messaging, presence, reactions, file attachments, and voice/video calls.
+
 ---
 
 ## OrbitProvider
 
-Wrap your app (or the section that uses OrbitConnect) once.
+The root context provider. Wrap your app (or the section that uses OrbitConnect) with it once.
 
 ```tsx
 <OrbitProvider
@@ -81,7 +86,7 @@ Wrap your app (or the section that uses OrbitConnect) once.
   userToken={token}
   appUserId={userId}
   baseTheme={darkTheme}
-  theme={{ primary: '#7c3aed' }}
+  theme={{ primary: '#7c3aed', bubbleSender: '#7c3aed' }}
   appConfig={{ name: 'MyApp', showPoweredBy: false }}
   onTokenExpired={async () => fetchFreshToken()}
 >
@@ -90,14 +95,14 @@ Wrap your app (or the section that uses OrbitConnect) once.
 ```
 
 | Prop | Type | Required | Description |
-|---|---|---|---|
-| `clientId` | `string` | ✓ | Publishable key (`pk_live_…` / `pk_test_…`) |
+| --- | --- | --- | --- |
+| `clientId` | `string` | ✓ | Publishable key (`pk_live_…` or `pk_test_…`) |
 | `userToken` | `string` | ✓ | Short-lived token from `orbit.users.createToken()` |
-| `appUserId` | `string` | ✓ | Authenticated app user ID |
-| `theme` | `PartialTheme` | | Theme overrides |
-| `baseTheme` | `OrbitTheme` | | Base theme (default: `darkTheme`) |
-| `onTokenExpired` | `() => Promise<string>` | | Called on WS close 4001 — return a fresh token |
-| `appConfig` | `AppConfig` | | Branding / white-label config |
+| `appUserId` | `string` | ✓ | The authenticated app user ID |
+| `theme` | `PartialTheme` | | CSS variable overrides — see [Theming](#theming) |
+| `baseTheme` | `OrbitTheme` | | Base theme object (default: `darkTheme`) |
+| `appConfig` | `AppConfig` | | Branding, icons, sounds — see [AppConfig](#appconfig) |
+| `onTokenExpired` | `() => Promise<string>` | | Called on WS close 4001 — return a fresh token to reconnect |
 
 ---
 
@@ -110,34 +115,51 @@ Drop-in components that work out of the box inside `OrbitProvider`.
 Full-featured chat UI — conversation list, message bubbles, composer, reactions, file attachments, voice messages, call buttons, and more.
 
 ```tsx
-import { Chat } from '@orbitconnect/react-native'
+import { Chat } from '@orbitconnect/react'
 
-<Chat conversationId={id} />
+<Chat
+  onCallRequest={(userId, type) => initiateCall(userId, type)}
+  chatBanner={<div>Support hours: Mon–Fri 9am–5pm</div>}
+  defaultQuickMessages={[
+    { id: '1', label: 'Greeting', text: 'Hi! How can I help?' },
+  ]}
+/>
 ```
 
 | Prop | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `conversationId` | `string` | Open directly to a specific conversation |
 | `onCallRequest` | `(userId, type) => void` | Called when the user taps the call/video button |
 | `renderHeader` | `(info: ChatHeaderInfo) => ReactNode` | Replace the default header |
+| `chatBanner` | `ReactNode` | Rendered above the message list |
+| `defaultQuickMessages` | `QuickMessage[]` | Seed the quick-message picker |
+
+Included out of the box: real-time messaging, typing indicators, read receipts, reactions, reply/quote, file/image/video/audio attachments, voice recording, sticker & GIF picker, message search, pin messages, batch select/delete/forward, presence, call history.
 
 ### VideoCall
 
 Floating WebRTC call overlay — renders automatically when a call is active.
 
 ```tsx
-import { VideoCall } from '@orbitconnect/react-native'
+import { VideoCall, useCall } from '@orbitconnect/react'
 
-// Place once at the root, inside OrbitProvider
-<VideoCall />
+function App() {
+  const { initiateCall } = useCall()
+  return (
+    <>
+      <button onClick={() => initiateCall(userId, 'video')}>Start call</button>
+      <VideoCall />  {/* place once at the root */}
+    </>
+  )
+}
 ```
 
 ### MeetingWidget
 
-Full video-conferencing room with participant grid, reactions, and hand-raise.
+Full video-conferencing room with participant grid, screen share, reactions, and hand-raise.
 
 ```tsx
-import { MeetingWidget } from '@orbitconnect/react-native'
+import { MeetingWidget } from '@orbitconnect/react'
 
 <MeetingWidget
   meetingId={activeMeetingId}
@@ -147,9 +169,9 @@ import { MeetingWidget } from '@orbitconnect/react-native'
 ```
 
 | Prop | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `meetingId` | `string` | ✓ | The meeting ID to join |
-| `title` | `string` | | Display title |
+| `title` | `string` | | Display title (default: `"Meeting"`) |
 | `onEnd` | `() => void` | | Called when the meeting ends or the user leaves |
 
 ---
@@ -162,13 +184,13 @@ All hooks must be used inside `OrbitProvider`.
 
 ```ts
 const {
-  messages,        // NativeMessage[]
+  messages,           // MessageBubbleProps[]
   loading,
-  typingUsers,     // string[] — display names of typing users
-  pinnedMessages,  // NativeMessage[]
-  sendMessage,     // (text, mediaId?, meta?) => Promise<void>
+  typingUsers,        // string[] — display names of typing users
+  pinnedMessages,
+  sendMessage,        // (text, mediaId?, meta?) => Promise<void>
   sendTyping,
-  markRead,        // (messageId: string) => void
+  markRead,
   editMessageLocally,
 } = useMessages(conversationId)
 ```
@@ -189,15 +211,14 @@ const {
 ```ts
 const {
   call,           // ActiveCall | null
-  localStream,
-  remoteStream,
+  localStream,    // MediaStream | null
+  remoteStream,   // MediaStream | null
   initiateCall,   // (userId, type, conversationId?) => void
   acceptCall,
   rejectCall,
   endCall,
   toggleMute,     // (muted: boolean) => void
   toggleCamera,   // (enabled: boolean) => void
-  switchCamera,
   dismissEnded,
 } = useCall()
 ```
@@ -219,36 +240,6 @@ const {
 } = useMeeting()
 ```
 
-### useAudioRecorder()
-
-```ts
-const {
-  isRecording,
-  durationMs,
-  startRecording,
-  stopRecording,    // () => Promise<RecordingResult>
-  cancelRecording,
-} = useAudioRecorder()
-
-// RecordingResult
-// { uri: string, durationMs: number, waveform: number[] }
-```
-
-### useMedia()
-
-```ts
-const {
-  upload,           // (localUri, mimeType, filename) => Promise<MediaObject>
-  uploadRecording,  // (localUri, mimeType?, filename?) => Promise<MediaObject>
-  uploadAndWait,    // upload + wait for server processing
-  getMedia,         // (mediaId: string) => Promise<MediaObject>
-  getDownloadUrl,   // (mediaId: string) => Promise<string>
-  isUploading,
-  isProcessing,
-  error,
-} = useMedia()
-```
-
 ### useNotifications()
 
 ```ts
@@ -264,15 +255,16 @@ const {
 ### usePresence(userId)
 
 ```ts
-const { status } = usePresence(userId)
-// status: 'online' | 'away' | 'offline'
+const status = usePresence(userId)  // 'online' | 'away' | 'offline'
 ```
 
-### useCallHistory()
+### useMedia()
 
 ```ts
-const { records, loading } = useCallHistory()
-// records: CallRecord[]
+const {
+  upload,   // (file: File) => Promise<MediaObject>
+  getUrl,   // (mediaId: string) => Promise<string>
+} = useMedia()
 ```
 
 ### useRealtime()
@@ -282,72 +274,15 @@ const {
   session,
   createSession,  // (input: CreateSessionInput) => Promise<void>
   endSession,
-  transition,     // (type: TransitionType, contextId?) => Promise<void>
-  isLoading,
-  error,
+  transition,     // (type: TransitionType, contextId?: string) => Promise<void>
+  emitEvent,      // (eventType: string, payload: object) => Promise<void>
 } = useRealtime()
 ```
 
-### useWebRTC(options)
-
-Low-level hook for custom call UIs.
+### useCallHistory()
 
 ```ts
-const { startCall, answerCall, toggleMute, toggleCamera, switchCamera, cleanup } = useWebRTC({
-  callId,
-  onRemoteStream: (stream) => setRemoteStream(stream),
-  onConnected: () => console.log('connected'),
-})
-```
-
-### useMeetingWebRTC(meetingId, appUserId)
-
-Low-level full-mesh WebRTC for custom meeting UIs.
-
-```ts
-const {
-  startLocalStream,
-  initiateOffer,
-  remoteStreams,   // RemoteStream[] — { userId, stream }[]
-  localStream,
-  toggleMute,
-  toggleCamera,
-  switchCamera,
-  cleanup,
-} = useMeetingWebRTC(meetingId, appUserId)
-```
-
-### useRecording(sessionId, sessionType)
-
-Server-side call/meeting recording (not device audio — use `useAudioRecorder` for that).
-
-```ts
-const {
-  isRecording,
-  recordings,      // RecordingInfo[]
-  startRecording,
-  stopRecording,
-  fetchRecordings,
-  error,
-} = useRecording(sessionId, 'call' | 'meeting')
-```
-
-### useSound()
-
-```ts
-const { play, stopRingtone } = useSound()
-
-play('incomingCall')   // plays ringtone + vibration
-play('messageReceived')
-stopRingtone()
-```
-
-### useAppBrand()
-
-Returns the resolved brand node based on `appConfig` flags (`showNameOnly`, `showLogoOnly`, etc.).
-
-```ts
-const brand = useAppBrand()  // ReactNode
+const { records } = useCallHistory()  // CallRecord[]
 ```
 
 ### useOrbitEvent(eventType, handler)
@@ -355,10 +290,14 @@ const brand = useAppBrand()  // ReactNode
 Subscribe to any raw WebSocket event.
 
 ```ts
-import { useOrbitEvent } from '@orbitconnect/react-native'
+import { useOrbitEvent } from '@orbitconnect/react'
 
 useOrbitEvent('message:new', ({ conversation_id, message }) => {
   console.log('New message:', message)
+})
+
+useOrbitEvent('notification:received', ({ payload }) => {
+  toast(payload.title as string)
 })
 ```
 
@@ -372,79 +311,30 @@ const { apiClient, appUserId, clientId, baseUrl, appConfig } = useOrbit()
 
 ---
 
-## Background & push notifications
-
-### Setup (Android)
-
-```ts
-import { initCallKeep, registerBackgroundCallNotificationHandler } from '@orbitconnect/react-native'
-
-// In your app entry point (index.js)
-registerBackgroundCallNotificationHandler()
-
-// In your root component
-await initCallKeep({ appName: 'MyApp' })
-```
-
-### Setup (iOS)
-
-CallKit is handled automatically via `react-native-callkeep`. Ensure `VoIP` background mode is enabled in Xcode capabilities.
-
-### Incoming call push (manual handling)
-
-```ts
-import { handleIncomingPush, showIncomingCallNotification } from '@orbitconnect/react-native'
-
-// From your FCM/APNs handler
-await showIncomingCallNotification({
-  call_id:     data.call_id,
-  caller_id:   data.caller_id,
-  caller_name: data.caller_name,
-  type:        'voice',
-})
-```
-
-### Call notification theme (Android)
-
-```tsx
-<OrbitProvider
-  appConfig={{
-    callNotification: {
-      backgroundColor: '#1a1a2e',
-      acceptColor:     '#4caf50',
-      declineColor:    '#f44336',
-      acceptLabel:     'Accept',
-      declineLabel:    'Decline',
-    },
-  }}
->
-```
-
-### Background service (deprecated)
-
-`backgroundService` / `useBackgroundServiceStatus` / `registerBackgroundCallHandler` are kept for backwards compatibility. Prefer CallKeep (`initCallKeep`) for new integrations.
-
----
-
 ## Theming
 
+Every colour, radius, and font is a CSS variable you can override.
+
 ```tsx
-import { OrbitProvider, darkTheme, lightTheme } from '@orbitconnect/react-native'
-import type { PartialTheme } from '@orbitconnect/react-native'
+import { OrbitProvider, darkTheme, lightTheme } from '@orbitconnect/react'
+import type { PartialTheme } from '@orbitconnect/react'
 
 const myTheme: PartialTheme = {
-  primary:      '#7c3aed',
-  bubbleSender: '#7c3aed',
+  primary:                '#7c3aed',
+  bubbleSender:           '#7c3aed',
+  bubbleSenderForeground: '#fff',
 }
 
 <OrbitProvider baseTheme={darkTheme} theme={myTheme} ...>
 ```
 
+Key token groups: `background`, `foreground`, `card`, `border`, `primary`, `bubbleSender`, `bubbleReceiver`, `composerBg`, `radiusSm/Md/Lg/Xl`, `fontBody`.
+
 ---
 
 ## AppConfig
 
-White-label the UI — name, logo, icons, sounds, and feature flags.
+White-label every aspect of the UI — name, logo, icons, sounds, and feature flags.
 
 ```tsx
 <OrbitProvider
@@ -453,8 +343,7 @@ White-label the UI — name, logo, icons, sounds, and feature flags.
     logo:          <MyLogo />,
     showPoweredBy: false,
 
-    // Feature flags
-    showChatHeader:         true,
+    // feature flags
     showAudioIcon:          true,
     showVideoIcon:          true,
     showSearchIcon:         true,
@@ -463,23 +352,16 @@ White-label the UI — name, logo, icons, sounds, and feature flags.
     useRichTextEditor:      true,
     enableMeetingUi:        true,
 
-    // Icon overrides (any ReactNode)
-    sendIcon:     <IoSend />,
-    callIcon:     <IoCall />,
-    VideoCallIcon: <IoVideocam />,
+    // icon overrides (any ReactNode)
+    sendIcon:        <IoPaperPlaneOutline />,
+    callIcon:        <IoCallOutline />,
+    VideoCallIcon:   <IoVideocamOutline />,
 
-    // Custom sounds (local file paths or remote URLs)
+    // custom sounds
     sounds: {
-      messageSent:     require('./sounds/sent.mp3'),
-      messageReceived: require('./sounds/received.mp3'),
-      incomingCall:    require('./sounds/ring.mp3'),
-    },
-
-    // In-app notification toasts
-    notifications: {
-      position:    'top',
-      duration:    4000,
-      maxVisible:  3,
+      messageSent:     '/sounds/sent.mp3',
+      messageReceived: '/sounds/received.mp3',
+      incomingCall:    '/sounds/ring.mp3',
     },
   }}
 >
@@ -489,7 +371,7 @@ White-label the UI — name, logo, icons, sounds, and feature flags.
 
 ## Token refresh
 
-When the server closes the WebSocket with code `4001`, the SDK calls `onTokenExpired`. Return a fresh token to reconnect automatically.
+When the server closes the WebSocket with code `4001` (token expired), the SDK calls `onTokenExpired`. Return a fresh token to reconnect automatically.
 
 ```tsx
 <OrbitProvider
@@ -504,43 +386,6 @@ When the server closes the WebSocket with code `4001`, the SDK calls `onTokenExp
 
 ---
 
-## Direct API access
-
-```ts
-import { ApiClient } from '@orbitconnect/react-native'
-
-const client = new ApiClient({ baseUrl, userToken, clientId, appUserId })
-const data = await client.get('/conversations')
-```
-
----
-
-## Third-party library mapping
-
-| Feature | Library |
-|---|---|
-| WebRTC (calls + meetings) | `react-native-webrtc` |
-| Notification sounds | `react-native-sound` |
-| System sounds / ringtone | `@dashdoc/react-native-system-sounds` |
-| Voice message recording | `react-native-audio-recorder-player` |
-| Image/video picker | `react-native-image-picker` |
-| File picker | `react-native-document-picker` |
-| Video playback | `react-native-video` |
-| Image display | `react-native-fast-image` |
-| Clipboard | `@react-native-clipboard/clipboard` |
-| Haptic feedback | `react-native-haptic-feedback` |
-| Animations | `react-native-reanimated` |
-| Gestures | `react-native-gesture-handler` |
-| Virtualized lists | `@shopify/flash-list` |
-| CallKit / ConnectionService | `react-native-callkeep` |
-| VoIP push (iOS) | `react-native-voip-push-notification` |
-| FCM push (Android) | `@react-native-firebase/messaging` |
-| In-app notifications | `@notifee/react-native` |
-| Async storage | `@react-native-async-storage/async-storage` |
-| Date formatting | `dayjs` |
-
----
-
 ## License
 
-MIT
+MIT — [orbitconnect.cloud](https://orbitconnect.cloud)
